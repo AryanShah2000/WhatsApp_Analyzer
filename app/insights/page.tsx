@@ -10,10 +10,11 @@ import {
   MessageCircle,
   Users,
   Lightbulb,
-  Star,
   Brain,
   FileText,
   CheckCircle2,
+  CalendarDays,
+  Activity,
 } from "lucide-react";
 
 interface Personality {
@@ -26,7 +27,6 @@ interface Personality {
 interface Topic {
   topic: string;
   description: string;
-  frequency: "high" | "medium" | "low";
 }
 
 interface Dynamics {
@@ -35,26 +35,39 @@ interface Dynamics {
   groupMood: string;
 }
 
+interface Engagement {
+  name: string;
+  score: "high" | "medium" | "low";
+  description: string;
+}
+
 interface Insights {
   summary: string;
   personalities: Personality[];
   topics: Topic[];
   dynamics: Dynamics;
-  highlights: string[];
+  engagement: Engagement[];
 }
 
 const MAX_FILE_SIZE = 100_000_000; // 100MB
 
-const frequencyColor: Record<string, string> = {
-  high: "bg-red-50 text-red-600 ring-1 ring-red-200",
-  medium: "bg-yellow-50 text-yellow-600 ring-1 ring-yellow-200",
-  low: "bg-blue-50 text-blue-600 ring-1 ring-blue-200",
+const engagementColor: Record<string, string> = {
+  high: "bg-green-50 text-green-700 ring-1 ring-green-200",
+  medium: "bg-yellow-50 text-yellow-700 ring-1 ring-yellow-200",
+  low: "bg-red-50 text-red-600 ring-1 ring-red-200",
+};
+
+const engagementEmoji: Record<string, string> = {
+  high: "🔥",
+  medium: "💬",
+  low: "👻",
 };
 
 export default function AIInsightsPage() {
   const [chatText, setChatText] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [insights, setInsights] = useState<Insights | null>(null);
+  const [meta, setMeta] = useState<{ msgCount: number; dateRange: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -99,6 +112,7 @@ export default function AIInsightsPage() {
       }
 
       setInsights(data.insights);
+      setMeta(data.meta || null);
     } catch {
       setError("Failed to connect to the server. Please try again.");
     } finally {
@@ -120,8 +134,8 @@ export default function AIInsightsPage() {
               AI-Powered Insights
             </h1>
             <p className="text-lg text-gray-500 max-w-xl mx-auto leading-relaxed">
-              Upload your chat and let AI uncover personality profiles, recurring
-              topics, relationship dynamics, and conversation highlights.
+              Upload your chat and let AI uncover personality profiles, hottest
+              topics, relationship dynamics, and engagement insights.
             </p>
           </div>
         </section>
@@ -242,6 +256,16 @@ export default function AIInsightsPage() {
         {insights && (
           <section className="px-6 pb-20 animate-[fadeIn_0.5s_ease-out]">
             <div className="max-w-4xl mx-auto space-y-6">
+              {/* Date range banner */}
+              {meta && (
+                <div className="bg-green-50/70 border border-green-100 rounded-xl px-5 py-3 flex items-center justify-center gap-3 text-sm">
+                  <CalendarDays className="w-4 h-4 text-[#25D366]" />
+                  <span className="text-gray-600">
+                    Analysed <span className="font-semibold text-gray-900">{meta.msgCount.toLocaleString()}</span> messages from <span className="font-semibold text-gray-900">{meta.dateRange}</span>
+                  </span>
+                </div>
+              )}
+
               {/* Summary */}
               <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
                 <h2 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
@@ -300,18 +324,16 @@ export default function AIInsightsPage() {
                   <div className="w-8 h-8 rounded-lg bg-green-50 text-[#25D366] flex items-center justify-center">
                     <Lightbulb className="w-4 h-4" />
                   </div>
-                  Recurring Topics
+                  🔥 Hottest Topics
                 </h2>
                 <div className="space-y-3">
-                  {insights.topics.map((t) => (
+                  {insights.topics.map((t, i) => (
                     <div
                       key={t.topic}
                       className="flex items-start gap-3 p-4 rounded-xl bg-gray-50/70 hover:bg-gray-50 transition-colors"
                     >
-                      <span
-                        className={`text-xs font-semibold px-2.5 py-0.5 rounded-full mt-0.5 capitalize ${frequencyColor[t.frequency]}`}
-                      >
-                        {t.frequency}
+                      <span className="flex-shrink-0 w-7 h-7 rounded-full bg-[#25D366] text-white text-xs font-bold flex items-center justify-center mt-0.5">
+                        {i + 1}
                       </span>
                       <div>
                         <p className="font-semibold text-gray-900">{t.topic}</p>
@@ -370,30 +392,48 @@ export default function AIInsightsPage() {
                 </div>
               </div>
 
-              {/* Highlights */}
-              {insights.highlights.length > 0 && (
+              {/* Engagement Meter */}
+              {insights.engagement && insights.engagement.length > 0 && (
                 <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
-                  <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-gray-900 mb-2 flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg bg-green-50 text-[#25D366] flex items-center justify-center">
-                      <Star className="w-4 h-4" />
+                      <Activity className="w-4 h-4" />
                     </div>
-                    Chat Highlights
+                    Engagement Meter
                   </h2>
-                  <ul className="space-y-2.5">
-                    {insights.highlights.map((h, i) => (
-                      <li
-                        key={i}
-                        className="flex items-start gap-3 p-3.5 rounded-xl bg-green-50/50 text-gray-700 text-sm border border-green-100/50"
-                      >
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#25D366] text-white text-xs font-bold flex items-center justify-center mt-0.5">
-                          {i + 1}
-                        </span>
-                        <span className="leading-relaxed">{h}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <p className="text-sm text-gray-400 mb-4 ml-10">
+                    Who sparks conversations vs. who gets left on read
+                  </p>
+                  <div className="space-y-3">
+                    {insights.engagement
+                      .sort((a, b) => {
+                        const order = { high: 0, medium: 1, low: 2 };
+                        return order[a.score] - order[b.score];
+                      })
+                      .map((e) => (
+                        <div
+                          key={e.name}
+                          className="flex items-start gap-3 p-4 rounded-xl bg-gray-50/70 hover:bg-gray-50 transition-colors"
+                        >
+                          <span className="text-xl mt-0.5 select-none">{engagementEmoji[e.score]}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <p className="font-semibold text-gray-900">{e.name}</p>
+                              <span
+                                className={`text-xs font-semibold px-2.5 py-0.5 rounded-full capitalize ${engagementColor[e.score]}`}
+                              >
+                                {e.score}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-500">{e.description}</p>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
                 </div>
               )}
+
+
             </div>
           </section>
         )}
