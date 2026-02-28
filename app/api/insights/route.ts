@@ -169,7 +169,7 @@ Return ONLY valid JSON, no markdown fences, no extra text.`;
       // LLM sometimes has unescaped characters — try to fix common issues
       // Replace unescaped newlines/tabs inside strings
       const fixed = cleaned
-        .replace(/[\x00-\x1f]/g, (ch) => {
+        .replace(/[\x00-\x1f]/g, (ch: string) => {
           if (ch === "\n") return "\\n";
           if (ch === "\r") return "\\r";
           if (ch === "\t") return "\\t";
