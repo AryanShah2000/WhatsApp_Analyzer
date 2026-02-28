@@ -1,83 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseWhatsAppChat } from "@/lib/parser";
 
-// Max raw upload: 100 MB
-const MAX_CHAT_LENGTH = 100_000_000;
-
-// Max characters to send to OpenAI (~4 chars ≈ 1 token, keep well under 25k tokens)
-const MAX_AI_CHARS = 80_000;
-
-// Only analyse the most recent N days
-const DAYS_TO_ANALYSE = 30;
-
-/**
- * Filter parsed messages to the last `DAYS_TO_ANALYSE` days,
- * then flatten back into a compact text block for the LLM.
- */
-function prepareChat(rawText: string): { text: string; msgCount: number; dateRange: string; senders: string[] } {
-  const messages = parseWhatsAppChat(rawText);
-
-  if (messages.length === 0) {
-    return { text: "", msgCount: 0, dateRange: "", senders: [] };
-  }
-
-  // Find the most recent message date and compute cutoff
-  const latest = messages.reduce((max, m) => (m.date > max ? m.date : max), messages[0].date);
-  const cutoff = new Date(latest);
-  cutoff.setDate(cutoff.getDate() - DAYS_TO_ANALYSE);
-
-  const recent = messages.filter((m) => m.date >= cutoff);
-
-  if (recent.length === 0) {
-    return { text: "", msgCount: 0, dateRange: "", senders: [] };
-  }
-
-  // Collect unique sender names
-  const senders = [...new Set(recent.map((m) => m.sender))].sort();
-
-  // Build a compact representation: "MM/DD HH:MM | Sender: message"
-  const lines = recent.map((m) => {
-    const d = m.date;
-    const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
-    const hour = String(m.hour).padStart(2, "0");
-    return `${dateStr} ${hour}:00 | ${m.sender}: ${m.message}`;
-  });
-
-  let text = lines.join("\n");
-
-  // Truncate from the beginning (keep most recent) if still too long
-  if (text.length > MAX_AI_CHARS) {
-    text = text.slice(-MAX_AI_CHARS);
-    // Trim to the next full line to avoid a partial message
-    const firstNewline = text.indexOf("\n");
-    if (firstNewline !== -1) {
-      text = text.slice(firstNewline + 1);
-    }
-  }
-
-  const earliest = recent[0].date;
-  const dateRange = `${earliest.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${latest.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
-
-  return { text, msgCount: recent.length, dateRange, senders };
-}
+// Allow longer execution for OpenAI call
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const { chatText } = await req.json();
+    const { text, msgCount, dateRange, senders } = await req.json();
 
-    if (!chatText || typeof chatText !== "string") {
+    if (!text || typeof text !== "string") {
       return NextResponse.json(
-        { error: "Missing or invalid chat text." },
+        { error: "Missing or invalid prepared chat text." },
         { status: 400 }
-      );
-    }
-
-    if (chatText.length > MAX_CHAT_LENGTH) {
-      return NextResponse.json(
-        {
-          error: `Chat text too large (${(chatText.length / 1_000_000).toFixed(1)}MB). Maximum is ${MAX_CHAT_LENGTH / 1_000_000}MB.`,
-        },
-        { status: 413 }
       );
     }
 
@@ -89,26 +23,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Parse & filter to last 30 days
-    const { text, msgCount, dateRange, senders } = prepareChat(chatText);
+    console.log(`AI Insights: ${msgCount} messages (${dateRange}), ${text.length} chars, ${senders?.length ?? "?"} participants`);
 
-    if (msgCount === 0 || !text) {
-      return NextResponse.json(
-        { error: "No messages found in the last 30 days. Make sure the file is a valid WhatsApp export." },
-        { status: 400 }
-      );
-    }
-
-    console.log(`AI Insights: Sending ${msgCount} messages (${dateRange}), ${text.length} chars, ${senders.length} participants`);
-
-    const senderList = senders.join(", ");
+    const senderList = (senders as string[]).join(", ");
+    const senderCount = (senders as string[]).length;
 
     const systemPrompt = `You are an expert WhatsApp chat analyst. The user will provide the last 30 days of a WhatsApp group chat (${msgCount} messages, ${dateRange}). The participants are: ${senderList}.
 
 Analyse it thoroughly and return a structured JSON response with the following sections:
 
 1. "summary" — A 2-3 sentence overall summary of the chat dynamics.
-2. "personalities" — An array of objects { "name": string, "traits": string, "communicationStyle": string, "notableQuotes": string[] } for EVERY participant listed above. You MUST include all ${senders.length} participants, even if they are less active — describe what you can observe.
+2. "personalities" — An array of objects { "name": string, "traits": string, "communicationStyle": string, "notableQuotes": string[] } for EVERY participant listed above. You MUST include all ${senderCount} participants, even if they are less active — describe what you can observe.
 3. "topics" — An array of EXACTLY 5 objects { "topic": string, "description": string } for the top 5 hottest/most-discussed topics. Be VERY specific — don't say generic categories like "basketball" or "movies". Instead say exactly what was discussed, e.g. "LeBron's trade to the Warriors" or "Oppenheimer movie review debate". The description should elaborate on what was said and who was involved.
 4. "dynamics" — An object { "closestPairs": string[], "conflicts": string[], "groupMood": string } describing relationship dynamics.
 5. "engagement" — An array of objects { "name": string, "score": "high" | "medium" | "low", "description": string } for EVERY participant. Score reflects how much engagement/replies their messages generate. "high" = their messages spark conversations, people reply and react. "medium" = average engagement. "low" = often gets left on read, messages don't generate much discussion, or they don't contribute much value.

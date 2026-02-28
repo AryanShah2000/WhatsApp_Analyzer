@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Footer from "@/components/Footer";
+import { parseWhatsAppChat } from "@/lib/parser";
 import {
   Sparkles,
   Upload,
@@ -98,10 +99,50 @@ export default function AIInsightsPage() {
     setInsights(null);
 
     try {
+      // Parse & filter client-side to keep payload small (avoids Vercel 4.5MB body limit)
+      const MAX_AI_CHARS = 80_000;
+      const DAYS_TO_ANALYSE = 30;
+
+      const messages = parseWhatsAppChat(chatText);
+      if (messages.length === 0) {
+        setError("No messages found. Make sure the file is a valid WhatsApp export.");
+        return;
+      }
+
+      const latest = messages.reduce((max, m) => (m.date > max ? m.date : max), messages[0].date);
+      const cutoff = new Date(latest);
+      cutoff.setDate(cutoff.getDate() - DAYS_TO_ANALYSE);
+      const recent = messages.filter((m) => m.date >= cutoff);
+
+      if (recent.length === 0) {
+        setError("No messages found in the last 30 days.");
+        return;
+      }
+
+      const senders = [...new Set(recent.map((m) => m.sender))].sort();
+
+      const lines = recent.map((m) => {
+        const d = m.date;
+        const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+        const hour = String(m.hour).padStart(2, "0");
+        return `${dateStr} ${hour}:00 | ${m.sender}: ${m.message}`;
+      });
+
+      let text = lines.join("\n");
+      if (text.length > MAX_AI_CHARS) {
+        text = text.slice(-MAX_AI_CHARS);
+        const firstNewline = text.indexOf("\n");
+        if (firstNewline !== -1) text = text.slice(firstNewline + 1);
+      }
+
+      const earliest = recent[0].date;
+      const dateRange = `${earliest.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${latest.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+      const msgCount = recent.length;
+
       const res = await fetch("/api/insights", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatText }),
+        body: JSON.stringify({ text, msgCount, dateRange, senders }),
       });
 
       const data = await res.json();
