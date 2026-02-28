@@ -1,0 +1,405 @@
+"use client";
+
+import { useState } from "react";
+import Footer from "@/components/Footer";
+import {
+  Sparkles,
+  Upload,
+  Loader2,
+  User,
+  MessageCircle,
+  Users,
+  Lightbulb,
+  Star,
+  Brain,
+  FileText,
+  CheckCircle2,
+} from "lucide-react";
+
+interface Personality {
+  name: string;
+  traits: string;
+  communicationStyle: string;
+  notableQuotes: string[];
+}
+
+interface Topic {
+  topic: string;
+  description: string;
+  frequency: "high" | "medium" | "low";
+}
+
+interface Dynamics {
+  closestPairs: string[];
+  conflicts: string[];
+  groupMood: string;
+}
+
+interface Insights {
+  summary: string;
+  personalities: Personality[];
+  topics: Topic[];
+  dynamics: Dynamics;
+  highlights: string[];
+}
+
+const MAX_FILE_SIZE = 100_000_000; // 100MB
+
+const frequencyColor: Record<string, string> = {
+  high: "bg-red-50 text-red-600 ring-1 ring-red-200",
+  medium: "bg-yellow-50 text-yellow-600 ring-1 ring-yellow-200",
+  low: "bg-blue-50 text-blue-600 ring-1 ring-blue-200",
+};
+
+export default function AIInsightsPage() {
+  const [chatText, setChatText] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [insights, setInsights] = useState<Insights | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const handleFile = (file: File) => {
+    setFileName(file.name);
+    setInsights(null);
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (text.length > MAX_FILE_SIZE) {
+        setError(
+          `File too large (${(text.length / 1_000_000).toFixed(1)}MB). Maximum is ${MAX_FILE_SIZE / 1_000_000}MB. Try exporting a shorter date range from WhatsApp.`
+        );
+        setChatText(null);
+        return;
+      }
+      setChatText(text);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleAnalyze = async () => {
+    if (!chatText) return;
+    setLoading(true);
+    setError(null);
+    setInsights(null);
+
+    try {
+      const res = await fetch("/api/insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatText }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Something went wrong.");
+        return;
+      }
+
+      setInsights(data.insights);
+    } catch {
+      setError("Failed to connect to the server. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="flex-1">
+        {/* Header */}
+        <section className="pt-16 pb-10 px-6 text-center">
+          <div className="max-w-3xl mx-auto">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 mb-6 text-sm font-medium rounded-full bg-gradient-to-r from-yellow-50 to-amber-50 text-yellow-700 ring-1 ring-yellow-200/50">
+              <Sparkles className="w-4 h-4" />
+              Premium Feature
+            </div>
+            <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-3 tracking-tight">
+              AI-Powered Insights
+            </h1>
+            <p className="text-lg text-gray-500 max-w-xl mx-auto leading-relaxed">
+              Upload your chat and let AI uncover personality profiles, recurring
+              topics, relationship dynamics, and conversation highlights.
+            </p>
+          </div>
+        </section>
+
+        {/* Upload */}
+        <section className="px-6 pb-10">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              const file = e.dataTransfer.files[0];
+              if (file) handleFile(file);
+            }}
+            onClick={() => document.getElementById("ai-file-input")?.click()}
+            className={`w-full max-w-xl mx-auto border-2 border-dashed rounded-2xl p-10 text-center transition-all duration-300 cursor-pointer ${
+              fileName
+                ? "border-[#25D366] bg-green-50/50"
+                : dragging
+                  ? "border-[#25D366] bg-green-50 scale-[1.01]"
+                  : "border-gray-300 hover:border-[#25D366]/50 hover:bg-green-50/30 bg-white"
+            }`}
+          >
+            <input
+              id="ai-file-input"
+              type="file"
+              accept=".txt"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleFile(file);
+              }}
+            />
+            {fileName ? (
+              <div className="animate-[fadeInScale_0.3s_ease-out]">
+                <div className="w-12 h-12 rounded-full bg-[#25D366]/10 flex items-center justify-center mx-auto mb-3">
+                  <CheckCircle2 className="w-7 h-7 text-[#25D366]" />
+                </div>
+                <div className="flex items-center justify-center gap-2 mb-1">
+                  <FileText className="w-4 h-4 text-gray-400" />
+                  <p className="text-lg font-semibold text-gray-900">{fileName}</p>
+                </div>
+                <p className="text-sm text-[#25D366] font-medium">
+                  File loaded · Click to change
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="w-12 h-12 rounded-full bg-green-50 flex items-center justify-center mx-auto mb-3">
+                  <Upload className="w-6 h-6 text-[#25D366]" />
+                </div>
+                <p className="text-lg font-semibold text-gray-900 mb-1">
+                  Drop your WhatsApp .txt file here
+                </p>
+                <p className="text-gray-500 text-sm">
+                  or{" "}
+                  <span className="text-[#25D366] font-medium underline underline-offset-2">
+                    click to browse
+                  </span>{" "}
+                  · Max {MAX_FILE_SIZE / 1_000_000}MB
+                </p>
+              </>
+            )}
+          </div>
+
+          {/* Analyze button */}
+          {chatText && !loading && !insights && (
+            <div className="text-center mt-6 animate-[fadeIn_0.3s_ease-out]">
+              <button
+                onClick={handleAnalyze}
+                className="group px-10 py-4 rounded-full text-white text-lg font-semibold shadow-lg shadow-green-200/50 transition-all duration-300 hover:shadow-xl hover:shadow-green-300/50 hover:scale-[1.03] active:scale-100 inline-flex items-center gap-2"
+                style={{ backgroundColor: "#25D366" }}
+              >
+                <Sparkles className="w-5 h-5" />
+                Generate AI Insights
+              </button>
+            </div>
+          )}
+
+          {/* Loading */}
+          {loading && (
+            <div className="text-center mt-10 animate-[fadeIn_0.3s_ease-out]">
+              <div className="inline-flex flex-col items-center bg-white rounded-2xl border border-gray-100 shadow-sm p-8 max-w-sm">
+                <div className="relative mb-5">
+                  <Brain className="w-12 h-12 text-[#25D366] animate-[pulse-soft_2s_ease-in-out_infinite]" />
+                  <Loader2 className="w-6 h-6 text-[#25D366] animate-spin absolute -bottom-1 -right-1" />
+                </div>
+                <p className="text-gray-900 font-semibold text-lg mb-1">
+                  Analyzing your chat…
+                </p>
+                <p className="text-gray-400 text-sm">
+                  This usually takes 15–30 seconds
+                </p>
+                <div className="w-full bg-gray-100 rounded-full h-1.5 mt-4 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-[#25D366] animate-[pulse-soft_1.5s_ease-in-out_infinite]"
+                    style={{ width: "70%" }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="max-w-xl mx-auto mt-4">
+              <p className="text-red-500 text-center font-medium bg-red-50 rounded-lg px-4 py-3">
+                {error}
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* Results */}
+        {insights && (
+          <section className="px-6 pb-20 animate-[fadeIn_0.5s_ease-out]">
+            <div className="max-w-4xl mx-auto space-y-6">
+              {/* Summary */}
+              <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+                <h2 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-green-50 text-[#25D366] flex items-center justify-center">
+                    <MessageCircle className="w-4 h-4" />
+                  </div>
+                  Chat Summary
+                </h2>
+                <p className="text-gray-600 leading-relaxed">
+                  {insights.summary}
+                </p>
+              </div>
+
+              {/* Personalities */}
+              <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+                <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-green-50 text-[#25D366] flex items-center justify-center">
+                    <User className="w-4 h-4" />
+                  </div>
+                  Personality Profiles
+                </h2>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {insights.personalities.map((p) => (
+                    <div
+                      key={p.name}
+                      className="border border-gray-100 rounded-xl p-5 hover:border-[#25D366]/20 hover:shadow-sm transition-all duration-300"
+                    >
+                      <h3 className="font-bold text-gray-900 mb-2 text-base">
+                        {p.name}
+                      </h3>
+                      <p className="text-sm text-gray-500 mb-1">
+                        <span className="font-semibold text-gray-700">Traits:</span>{" "}
+                        {p.traits}
+                      </p>
+                      <p className="text-sm text-gray-500 mb-3">
+                        <span className="font-semibold text-gray-700">Style:</span>{" "}
+                        {p.communicationStyle}
+                      </p>
+                      {p.notableQuotes.length > 0 && (
+                        <div className="space-y-1.5 pt-2 border-t border-gray-50">
+                          {p.notableQuotes.map((q, i) => (
+                            <p key={i} className="text-xs text-gray-400 italic pl-3 border-l-2 border-green-200">
+                              &ldquo;{q}&rdquo;
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Topics */}
+              <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+                <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-green-50 text-[#25D366] flex items-center justify-center">
+                    <Lightbulb className="w-4 h-4" />
+                  </div>
+                  Recurring Topics
+                </h2>
+                <div className="space-y-3">
+                  {insights.topics.map((t) => (
+                    <div
+                      key={t.topic}
+                      className="flex items-start gap-3 p-4 rounded-xl bg-gray-50/70 hover:bg-gray-50 transition-colors"
+                    >
+                      <span
+                        className={`text-xs font-semibold px-2.5 py-0.5 rounded-full mt-0.5 capitalize ${frequencyColor[t.frequency]}`}
+                      >
+                        {t.frequency}
+                      </span>
+                      <div>
+                        <p className="font-semibold text-gray-900">{t.topic}</p>
+                        <p className="text-sm text-gray-500 mt-0.5">{t.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Dynamics */}
+              <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+                <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-green-50 text-[#25D366] flex items-center justify-center">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  Group Dynamics
+                </h2>
+                <div className="space-y-4">
+                  <div className="bg-gray-50/70 rounded-xl p-4">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                      Group Mood
+                    </p>
+                    <p className="text-gray-700">{insights.dynamics.groupMood}</p>
+                  </div>
+                  {insights.dynamics.closestPairs.length > 0 && (
+                    <div className="bg-gray-50/70 rounded-xl p-4">
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                        Closest Pairs
+                      </p>
+                      <ul className="space-y-1.5">
+                        {insights.dynamics.closestPairs.map((pair, i) => (
+                          <li key={i} className="flex items-center gap-2 text-sm text-gray-600">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#25D366]" />
+                            {pair}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {insights.dynamics.conflicts.length > 0 && (
+                    <div className="bg-gray-50/70 rounded-xl p-4">
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                        Tensions / Debates
+                      </p>
+                      <ul className="space-y-1.5">
+                        {insights.dynamics.conflicts.map((c, i) => (
+                          <li key={i} className="flex items-center gap-2 text-sm text-gray-600">
+                            <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />
+                            {c}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Highlights */}
+              {insights.highlights.length > 0 && (
+                <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+                  <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-green-50 text-[#25D366] flex items-center justify-center">
+                      <Star className="w-4 h-4" />
+                    </div>
+                    Chat Highlights
+                  </h2>
+                  <ul className="space-y-2.5">
+                    {insights.highlights.map((h, i) => (
+                      <li
+                        key={i}
+                        className="flex items-start gap-3 p-3.5 rounded-xl bg-green-50/50 text-gray-700 text-sm border border-green-100/50"
+                      >
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#25D366] text-white text-xs font-bold flex items-center justify-center mt-0.5">
+                          {i + 1}
+                        </span>
+                        <span className="leading-relaxed">{h}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+      </div>
+
+      <Footer />
+    </main>
+  );
+}
