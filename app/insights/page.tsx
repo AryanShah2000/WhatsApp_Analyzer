@@ -19,7 +19,9 @@ import {
   Activity,
   CreditCard,
   Lock,
+  Download,
 } from "lucide-react";
+import { generateInsightsPDF } from "@/lib/generatePDF";
 
 interface Personality {
   name: string;
@@ -417,6 +419,18 @@ function AIInsightsPageInner() {
                   </span>
                 </div>
               )}
+
+              {/* Download PDF button */}
+              <div className="flex justify-center">
+                <button
+                  onClick={() => generateInsightsPDF(insights, meta)}
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-full text-white font-semibold shadow-lg shadow-green-200/50 transition-all duration-300 hover:shadow-xl hover:shadow-green-300/50 hover:scale-[1.03] active:scale-100"
+                  style={{ backgroundColor: "#25D366" }}
+                >
+                  <Download className="w-4 h-4" />
+                  Download PDF Report
+                </button>
+              </div>
 
               {/* Summary */}
               <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
