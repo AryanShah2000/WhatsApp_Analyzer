@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Footer from "@/components/Footer";
 import { parseWhatsAppChat } from "@/lib/parser";
 import {
@@ -16,6 +17,8 @@ import {
   CheckCircle2,
   CalendarDays,
   Activity,
+  CreditCard,
+  Lock,
 } from "lucide-react";
 
 interface Personality {
@@ -64,7 +67,8 @@ const engagementEmoji: Record<string, string> = {
   low: "👻",
 };
 
-export default function AIInsightsPage() {
+function AIInsightsPageInner() {
+  const searchParams = useSearchParams();
   const [chatText, setChatText] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [insights, setInsights] = useState<Insights | null>(null);
@@ -72,6 +76,121 @@ export default function AIInsightsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [checkingPayment, setCheckingPayment] = useState(false);
+
+  /** Prepare chat client-side (parse, filter 30 days, compress) */
+  const prepareChat = useCallback((rawText: string) => {
+    const MAX_AI_CHARS = 80_000;
+    const DAYS_TO_ANALYSE = 30;
+
+    const messages = parseWhatsAppChat(rawText);
+    if (messages.length === 0) return null;
+
+    const latest = messages.reduce((max, m) => (m.date > max ? m.date : max), messages[0].date);
+    const cutoff = new Date(latest);
+    cutoff.setDate(cutoff.getDate() - DAYS_TO_ANALYSE);
+    const recent = messages.filter((m) => m.date >= cutoff);
+    if (recent.length === 0) return null;
+
+    const senders = [...new Set(recent.map((m) => m.sender))].sort();
+    const lines = recent.map((m) => {
+      const d = m.date;
+      return `${d.getMonth() + 1}/${d.getDate()} ${String(m.hour).padStart(2, "0")}:00 | ${m.sender}: ${m.message}`;
+    });
+
+    let text = lines.join("\n");
+    if (text.length > MAX_AI_CHARS) {
+      text = text.slice(-MAX_AI_CHARS);
+      const nl = text.indexOf("\n");
+      if (nl !== -1) text = text.slice(nl + 1);
+    }
+
+    const earliest = recent[0].date;
+    const dateRange = `${earliest.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${latest.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+
+    return { text, msgCount: recent.length, dateRange, senders };
+  }, []);
+
+  /** Call AI insights API with prepared data */
+  const fetchInsights = useCallback(async (prepared: { text: string; msgCount: number; dateRange: string; senders: string[] }) => {
+    setLoading(true);
+    setError(null);
+    setInsights(null);
+
+    try {
+      const res = await fetch("/api/insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(prepared),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Something went wrong.");
+        return;
+      }
+
+      setInsights(data.insights);
+      setMeta(data.meta || null);
+      // Clean up stored data
+      sessionStorage.removeItem("wa_prepared");
+    } catch {
+      setError("Failed to connect to the server. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  /** After Stripe redirects back, verify payment and auto-generate */
+  useEffect(() => {
+    const sessionId = searchParams.get("session_id");
+    const cancelled = searchParams.get("cancelled");
+
+    if (cancelled) {
+      setError("Payment was cancelled. You can try again.");
+      // Clean the URL
+      window.history.replaceState({}, "", "/insights");
+      return;
+    }
+
+    if (!sessionId) return;
+
+    const verifyAndGenerate = async () => {
+      setCheckingPayment(true);
+      try {
+        const res = await fetch("/api/verify-payment", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        });
+        const data = await res.json();
+
+        if (!data.paid) {
+          setError("Payment not completed. Please try again.");
+          return;
+        }
+
+        // Payment verified — retrieve stored chat data
+        const stored = sessionStorage.getItem("wa_prepared");
+        if (!stored) {
+          setError("Chat data expired. Please upload the file again and try once more.");
+          return;
+        }
+
+        const prepared = JSON.parse(stored);
+        // Clean the URL
+        window.history.replaceState({}, "", "/insights");
+        setFileName(sessionStorage.getItem("wa_fileName") || "chat.txt");
+        await fetchInsights(prepared);
+      } catch {
+        setError("Failed to verify payment. Please try again.");
+      } finally {
+        setCheckingPayment(false);
+      }
+    };
+
+    verifyAndGenerate();
+  }, [searchParams, fetchInsights]);
 
   const handleFile = (file: File) => {
     setFileName(file.name);
@@ -92,71 +211,41 @@ export default function AIInsightsPage() {
     reader.readAsText(file);
   };
 
+  /** Click "Generate" → prepare chat → save to sessionStorage → redirect to Stripe */
   const handleAnalyze = async () => {
     if (!chatText) return;
-    setLoading(true);
     setError(null);
-    setInsights(null);
 
+    const prepared = prepareChat(chatText);
+    if (!prepared) {
+      setError("No messages found in the last 30 days. Make sure the file is a valid WhatsApp export.");
+      return;
+    }
+
+    // Store prepared data so we can retrieve it after Stripe redirect
+    sessionStorage.setItem("wa_prepared", JSON.stringify(prepared));
+    sessionStorage.setItem("wa_fileName", fileName || "chat.txt");
+
+    // Create Stripe Checkout session
+    setLoading(true);
     try {
-      // Parse & filter client-side to keep payload small (avoids Vercel 4.5MB body limit)
-      const MAX_AI_CHARS = 80_000;
-      const DAYS_TO_ANALYSE = 30;
-
-      const messages = parseWhatsAppChat(chatText);
-      if (messages.length === 0) {
-        setError("No messages found. Make sure the file is a valid WhatsApp export.");
-        return;
-      }
-
-      const latest = messages.reduce((max, m) => (m.date > max ? m.date : max), messages[0].date);
-      const cutoff = new Date(latest);
-      cutoff.setDate(cutoff.getDate() - DAYS_TO_ANALYSE);
-      const recent = messages.filter((m) => m.date >= cutoff);
-
-      if (recent.length === 0) {
-        setError("No messages found in the last 30 days.");
-        return;
-      }
-
-      const senders = [...new Set(recent.map((m) => m.sender))].sort();
-
-      const lines = recent.map((m) => {
-        const d = m.date;
-        const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
-        const hour = String(m.hour).padStart(2, "0");
-        return `${dateStr} ${hour}:00 | ${m.sender}: ${m.message}`;
-      });
-
-      let text = lines.join("\n");
-      if (text.length > MAX_AI_CHARS) {
-        text = text.slice(-MAX_AI_CHARS);
-        const firstNewline = text.indexOf("\n");
-        if (firstNewline !== -1) text = text.slice(firstNewline + 1);
-      }
-
-      const earliest = recent[0].date;
-      const dateRange = `${earliest.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${latest.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
-      const msgCount = recent.length;
-
-      const res = await fetch("/api/insights", {
+      const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, msgCount, dateRange, senders }),
+        body: JSON.stringify({ origin: window.location.origin }),
       });
-
       const data = await res.json();
 
-      if (!res.ok) {
-        setError(data.error || "Something went wrong.");
+      if (!res.ok || !data.url) {
+        setError(data.error || "Failed to start checkout.");
+        setLoading(false);
         return;
       }
 
-      setInsights(data.insights);
-      setMeta(data.meta || null);
+      // Redirect to Stripe Checkout
+      window.location.href = data.url;
     } catch {
-      setError("Failed to connect to the server. Please try again.");
-    } finally {
+      setError("Failed to connect to the payment server. Please try again.");
       setLoading(false);
     }
   };
@@ -247,7 +336,7 @@ export default function AIInsightsPage() {
           </div>
 
           {/* Analyze button */}
-          {chatText && !loading && !insights && (
+          {chatText && !loading && !checkingPayment && !insights && (
             <div className="text-center mt-6 animate-[fadeIn_0.3s_ease-out]">
               <button
                 onClick={handleAnalyze}
@@ -255,8 +344,30 @@ export default function AIInsightsPage() {
                 style={{ backgroundColor: "#25D366" }}
               >
                 <Sparkles className="w-5 h-5" />
-                Generate AI Insights
+                Generate AI Insights · $0.99
               </button>
+              <div className="flex items-center justify-center gap-1.5 mt-3 text-xs text-gray-400">
+                <Lock className="w-3 h-3" />
+                <span>Secure payment via Stripe · Promo codes accepted</span>
+              </div>
+            </div>
+          )}
+
+          {/* Checking payment state */}
+          {checkingPayment && (
+            <div className="text-center mt-10 animate-[fadeIn_0.3s_ease-out]">
+              <div className="inline-flex flex-col items-center bg-white rounded-2xl border border-gray-100 shadow-sm p-8 max-w-sm">
+                <div className="relative mb-5">
+                  <CreditCard className="w-12 h-12 text-[#25D366] animate-[pulse-soft_2s_ease-in-out_infinite]" />
+                  <Loader2 className="w-6 h-6 text-[#25D366] animate-spin absolute -bottom-1 -right-1" />
+                </div>
+                <p className="text-gray-900 font-semibold text-lg mb-1">
+                  Verifying payment…
+                </p>
+                <p className="text-gray-400 text-sm">
+                  Hang tight, your report is on the way
+                </p>
+              </div>
             </div>
           )}
 
@@ -482,5 +593,17 @@ export default function AIInsightsPage() {
 
       <Footer />
     </main>
+  );
+}
+
+export default function AIInsightsPage() {
+  return (
+    <Suspense fallback={
+      <main className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-[#25D366] animate-spin" />
+      </main>
+    }>
+      <AIInsightsPageInner />
+    </Suspense>
   );
 }
