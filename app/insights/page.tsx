@@ -79,19 +79,30 @@ function AIInsightsPageInner() {
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [checkingPayment, setCheckingPayment] = useState(false);
+  const [timeRange, setTimeRange] = useState<"1M" | "3M" | "6M" | "1Y" | "ALL">("1M");
 
-  /** Prepare chat client-side (parse, filter 30 days, compress) */
-  const prepareChat = useCallback((rawText: string) => {
+  const TIME_RANGE_DAYS: Record<string, number | null> = {
+    "1M": 30,
+    "3M": 90,
+    "6M": 180,
+    "1Y": 365,
+    "ALL": null,
+  };
+
+  /** Prepare chat client-side (parse, filter by time range, compress) */
+  const prepareChat = useCallback((rawText: string, days: number | null) => {
     const MAX_AI_CHARS = 80_000;
-    const DAYS_TO_ANALYSE = 30;
 
     const messages = parseWhatsAppChat(rawText);
     if (messages.length === 0) return null;
 
     const latest = messages.reduce((max, m) => (m.date > max ? m.date : max), messages[0].date);
-    const cutoff = new Date(latest);
-    cutoff.setDate(cutoff.getDate() - DAYS_TO_ANALYSE);
-    const recent = messages.filter((m) => m.date >= cutoff);
+    let recent = messages;
+    if (days !== null) {
+      const cutoff = new Date(latest);
+      cutoff.setDate(cutoff.getDate() - days);
+      recent = messages.filter((m) => m.date >= cutoff);
+    }
     if (recent.length === 0) return null;
 
     const senders = [...new Set(recent.map((m) => m.sender))].sort();
@@ -218,9 +229,11 @@ function AIInsightsPageInner() {
     if (!chatText) return;
     setError(null);
 
-    const prepared = prepareChat(chatText);
+    const days = TIME_RANGE_DAYS[timeRange];
+    const prepared = prepareChat(chatText, days);
     if (!prepared) {
-      setError("No messages found in the last 30 days. Make sure the file is a valid WhatsApp export.");
+      const rangeLabel = timeRange === "ALL" ? "the chat" : `the last ${timeRange}`;
+      setError(`No messages found in ${rangeLabel}. Try a wider time range or check that the file is a valid WhatsApp export.`);
       return;
     }
 
@@ -337,20 +350,42 @@ function AIInsightsPageInner() {
             )}
           </div>
 
-          {/* Analyze button */}
+          {/* Time range filter + Analyze button */}
           {chatText && !loading && !checkingPayment && !insights && (
             <div className="text-center mt-6 animate-[fadeIn_0.3s_ease-out]">
-              <button
-                onClick={handleAnalyze}
-                className="group px-10 py-4 rounded-full text-white text-lg font-semibold shadow-lg shadow-green-200/50 transition-all duration-300 hover:shadow-xl hover:shadow-green-300/50 hover:scale-[1.03] active:scale-100 inline-flex items-center gap-2"
-                style={{ backgroundColor: "#25D366" }}
-              >
-                <Sparkles className="w-5 h-5" />
-                Generate AI Insights · $0.99
-              </button>
-              <div className="flex items-center justify-center gap-1.5 mt-3 text-xs text-gray-400">
-                <Lock className="w-3 h-3" />
-                <span>Secure payment via Stripe · Promo codes accepted</span>
+              {/* Time range selector */}
+              <div className="inline-flex flex-col items-center gap-3 mb-5">
+                <p className="text-sm font-medium text-gray-500">Analyse messages from the last</p>
+                <div className="inline-flex items-center gap-1.5 p-1 bg-gray-100 rounded-full">
+                  {(["1M", "3M", "6M", "1Y", "ALL"] as const).map((range) => (
+                    <button
+                      key={range}
+                      onClick={() => setTimeRange(range)}
+                      className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-all duration-200 ${
+                        timeRange === range
+                          ? "bg-white text-[#25D366] shadow-sm ring-1 ring-gray-200"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      {range}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <button
+                  onClick={handleAnalyze}
+                  className="group px-10 py-4 rounded-full text-white text-lg font-semibold shadow-lg shadow-green-200/50 transition-all duration-300 hover:shadow-xl hover:shadow-green-300/50 hover:scale-[1.03] active:scale-100 inline-flex items-center gap-2"
+                  style={{ backgroundColor: "#25D366" }}
+                >
+                  <Sparkles className="w-5 h-5" />
+                  Generate AI Insights · $0.99
+                </button>
+                <div className="flex items-center justify-center gap-1.5 mt-3 text-xs text-gray-400">
+                  <Lock className="w-3 h-3" />
+                  <span>Secure payment via Stripe · Promo codes accepted</span>
+                </div>
               </div>
             </div>
           )}
