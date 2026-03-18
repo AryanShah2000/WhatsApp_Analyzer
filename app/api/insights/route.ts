@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     const senderList = (senders as string[]).join(", ");
     const senderCount = (senders as string[]).length;
 
-    const systemPrompt = `You are an expert WhatsApp chat analyst. The user will provide the last 30 days of a WhatsApp group chat (${msgCount} messages, ${dateRange}). The participants are: ${senderList}.
+    const systemPrompt = `You are an expert WhatsApp chat analyst. The user will provide a WhatsApp group chat (${msgCount} messages, ${dateRange}). The participants are: ${senderList}.
 
 Analyse it thoroughly and return a structured JSON response with the following sections:
 
